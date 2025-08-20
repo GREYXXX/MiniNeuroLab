@@ -1,3 +1,2 @@
-# Lightweight-fine-tuning methods
-Easy LoRa fine-tuning
-Easy Prefix fine-tuning
+# MiniNeuroLab
+A sandbox for training, tweaking and playing with some mini LMs and mixing modalities
