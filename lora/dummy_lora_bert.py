@@ -22,11 +22,17 @@ class DummyDataset(Dataset):
 
     def __getitem__(self, idx):
         text, label = self.samples[idx]
-        enc = self.tokenizer(text, truncation=True, padding="max_length", max_length=32, return_tensors="pt")
+        enc = self.tokenizer(
+            text,
+            truncation=True,
+            padding="max_length",
+            max_length=32,
+            return_tensors="pt",
+        )
         return {
             "input_ids": enc["input_ids"].squeeze(),
             "attention_mask": enc["attention_mask"].squeeze(),
-            "label": torch.tensor(label, dtype=torch.long)
+            "label": torch.tensor(label, dtype=torch.long),
         }
 
 
