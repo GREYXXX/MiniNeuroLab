@@ -2,22 +2,13 @@
 Easy BERT Fine-tuning with LoRA using Hugging Face
 ==================================================
 
-This tutorial demonstrates how to fine-tune BERT for text classification using LoRA
+This script demonstrates how to fine-tune BERT for text classification using LoRA
 (Low-Rank Adaptation) with Hugging Face transformers and PEFT library.
 
 LoRA is a parameter-efficient fine-tuning technique that:
 1. Freezes the original model weights
 2. Adds small trainable low-rank matrices to specific layers
 3. Significantly reduces trainable parameters while maintaining performance
-
-Key Benefits:
-- Faster training (fewer parameters to update)
-- Lower memory usage
-- Easy to switch between different tasks
-- Preserves original model knowledge
-
-Author: Xi Rao
-Date: 2025-09-02
 """
 
 import torch
