@@ -3,10 +3,10 @@ import pytorch_lightning as pl
 from torch.utils.data import DataLoader, Dataset
 from dataclasses import dataclass
 import requests
-from typing import List
 
 from models.model_lm import GPTModel, GPTConfig
 import tiktoken
+from tokenizer.naive_tokenizer import NaiveTokenizer
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 
@@ -153,6 +153,10 @@ def train_gpt():
     print(f"Total text length: {len(text_data):,} characters")
 
     print("Creating data loaders...")
+
+    # NaiveTokenizer is better for small datasets, converges faster
+    # tokenizer = NaiveTokenizer()
+    # tokenizer.build_vocab_from_text(text_data)
     tokenizer = tiktoken.get_encoding("gpt2")
     train_loader, val_loader = create_data_loaders(
         text_data, tokenizer, gpt_config, train_config

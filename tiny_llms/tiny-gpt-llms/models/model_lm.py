@@ -3,8 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
 from dataclasses import dataclass
-from typing import Optional
-import math
 
 
 @dataclass
@@ -56,9 +54,9 @@ class MultiHeadAttention(nn.Module):
         self.n_heads = config.n_heads
         self.head_dim = config.emb_dim // config.n_heads
 
-        self.W_query = nn.Linear(config.emb_dim, config.emb_dim, bias=config.qkv_bias)
-        self.W_key = nn.Linear(config.emb_dim, config.emb_dim, bias=config.qkv_bias)
-        self.W_value = nn.Linear(config.emb_dim, config.emb_dim, bias=config.qkv_bias)
+        self.q_proj = nn.Linear(config.emb_dim, config.emb_dim, bias=config.qkv_bias)
+        self.k_proj = nn.Linear(config.emb_dim, config.emb_dim, bias=config.qkv_bias)
+        self.v_proj = nn.Linear(config.emb_dim, config.emb_dim, bias=config.qkv_bias)
         self.out_proj = nn.Linear(config.emb_dim, config.emb_dim)
         self.dropout = nn.Dropout(config.drop_rate)
 
@@ -70,29 +68,41 @@ class MultiHeadAttention(nn.Module):
         )
 
     def forward(self, x):
-        b, num_tokens, d_in = x.shape
+        batch_size, seq_len, d_emb = x.shape
 
-        keys = self.W_key(x)
-        queries = self.W_query(x)
-        values = self.W_value(x)
+        k_states = self.k_proj(x)
+        q_states = self.q_proj(x)
+        v_states = self.v_proj(x)
 
-        keys = keys.view(b, num_tokens, self.n_heads, self.head_dim)
-        values = values.view(b, num_tokens, self.n_heads, self.head_dim)
-        queries = queries.view(b, num_tokens, self.n_heads, self.head_dim)
+        # Reshape and transpose for multi-head attention
+        # (B, S, D) -> (B, S, n_head, head_dim) -> (B, n_head, S, head_dim)
+        k_states = k_states.view(
+            batch_size, seq_len, self.n_heads, self.head_dim
+        ).transpose(1, 2)
+        v_states = v_states.view(
+            batch_size, seq_len, self.n_heads, self.head_dim
+        ).transpose(1, 2)
+        q_states = q_states.view(
+            batch_size, seq_len, self.n_heads, self.head_dim
+        ).transpose(1, 2)
 
-        keys = keys.transpose(1, 2)
-        queries = queries.transpose(1, 2)
-        values = values.transpose(1, 2)
-
-        attn_scores = queries @ keys.transpose(2, 3)
-        mask_bool = self.mask.bool()[:num_tokens, :num_tokens]
+        # Dot product attention and apply mask
+        # (B, n_head, S, head_dim) @ (B, n_head, head_dim, S) -> (B, n_head, S, S)
+        attn_scores = q_states @ k_states.transpose(2, 3)
+        mask_bool = self.mask.bool()[:seq_len, :seq_len]
         attn_scores.masked_fill_(mask_bool, -torch.inf)
 
-        attn_weights = torch.softmax(attn_scores / math.sqrt(self.head_dim), dim=-1)
+        # Softmax attention weights
+        attn_weights = torch.softmax(attn_scores / self.head_dim**0.5, dim=-1)
         attn_weights = self.dropout(attn_weights)
 
-        context_vec = (attn_weights @ values).transpose(1, 2)
-        context_vec = context_vec.reshape(b, num_tokens, self.emb_dim)
+        # Weighted aggregation of values
+        # (B, n_head, S, S) @ (B, n_head, S, head_dim) -> (B, n_head, S, head_dim)
+        context_vec = (attn_weights @ v_states).transpose(1, 2)
+
+        # Reshape and output projection
+        # (B, n_head, S, head_dim) -> (B, S, n_head * head_dim)
+        context_vec = context_vec.reshape(batch_size, seq_len, self.emb_dim)
         context_vec = self.out_proj(context_vec)
 
         return context_vec
@@ -121,12 +131,14 @@ class TransformerBlock(nn.Module):
         self.drop_shortcut = nn.Dropout(config.drop_rate)
 
     def forward(self, x):
+        # Skip connection for attention
         shortcut = x
         x = self.norm1(x)
         x = self.att(x)
         x = self.drop_shortcut(x)
         x = x + shortcut
 
+        # Skip connection for feed forward
         shortcut = x
         x = self.norm2(x)
         x = self.ff(x)
@@ -168,15 +180,45 @@ class GPTModel(pl.LightningModule):
         input_batch, target_batch = batch
         logits = self(input_batch)
         loss = F.cross_entropy(logits.flatten(0, 1), target_batch.flatten())
-        self.log("train_loss", loss, prog_bar=True)
+        preds = torch.argmax(logits, dim=-1)
+        correct = (preds == target_batch).float().mean()
+        perplexity = torch.exp(loss.detach())
+        self.log("train_loss", loss, prog_bar=True, on_epoch=True)
+        self.log("train_ppl", perplexity, prog_bar=True, on_epoch=True)
+        self.log("train_acc", correct, prog_bar=True, on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         input_batch, target_batch = batch
         logits = self(input_batch)
         loss = F.cross_entropy(logits.flatten(0, 1), target_batch.flatten())
-        self.log("val_loss", loss, prog_bar=True)
+        preds = torch.argmax(logits, dim=-1)
+        correct = (preds == target_batch).float().mean()
+        perplexity = torch.exp(loss.detach())
+        self.log("val_loss", loss, prog_bar=True, on_epoch=True)
+        self.log("val_ppl", perplexity, prog_bar=True, on_epoch=True)
+        self.log("val_acc", correct, prog_bar=True, on_epoch=True)
         return loss
+
+    def on_validation_epoch_end(self):
+        metrics = self.trainer.callback_metrics
+        if "val_loss" in metrics:
+            print(
+                f"\n[Validation] Epoch {self.current_epoch} | "
+                f"Loss: {metrics['val_loss']:.4f} | "
+                f"PPL: {metrics['val_ppl']:.4f} | "
+                f"Accuracy: {metrics['val_acc']:.4f}"
+            )
+
+    def on_train_epoch_end(self):
+        metrics = self.trainer.callback_metrics
+        if "train_loss" in metrics:
+            print(
+                f"\n[Train] Epoch {self.current_epoch} | "
+                f"Loss: {metrics['train_loss']:.4f} | "
+                f"PPL: {metrics['train_ppl']:.4f} | "
+                f"Accuracy: {metrics['train_acc']:.4f}"
+            )
 
     def configure_optimizers(self):
         return torch.optim.AdamW(
