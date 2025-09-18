@@ -163,7 +163,7 @@ class GPTModel(pl.LightningModule):
         )
 
         self.final_norm = LayerNorm(config.emb_dim)
-        self.out_head = nn.Linear(config.emb_dim, config.vocab_size, bias=False)
+        self.lm_head = nn.Linear(config.emb_dim, config.vocab_size, bias=False)
 
     def forward(self, in_idx):
         batch_size, seq_len = in_idx.shape
@@ -173,7 +173,7 @@ class GPTModel(pl.LightningModule):
         x = self.drop_emb(x)
         x = self.trf_blocks(x)
         x = self.final_norm(x)
-        logits = self.out_head(x)
+        logits = self.lm_head(x)
         return logits
 
     def training_step(self, batch, batch_idx):
