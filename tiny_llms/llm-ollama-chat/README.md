@@ -22,7 +22,7 @@
 
 5. Install Python Dependencies 
    ```bash
-   pip install streamlit ollama
+   uv pip install streamlit ollama
    ```
 
 6. Save and Run the Streamlit App  
